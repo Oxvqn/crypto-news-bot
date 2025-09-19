@@ -1,14 +1,14 @@
 from flask import Flask, render_template, request
 import feedparser
-import openai
 import os
 import requests
 import tweepy
+from openai import OpenAI
 
 app = Flask(__name__)
 
 # Environment variables
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 twitter_bearer_token = os.environ.get("TWITTER_BEARER_TOKEN")
 
 # Coins to filter
@@ -20,25 +20,25 @@ twitter_client = tweepy.Client(bearer_token=twitter_bearer_token)
 # Binance-style summarization function
 def summarize_news_binance_style(text):
     prompt = f"""
-    Rewrite the following crypto news in a Binance-style format:
-    - Use engaging and concise sentences.
-    - Include emojis for excitement, warnings, or trends.
-    - Highlight coin symbols like $XRP, $BTC, $ETH.
-    - Make it easy to read and copy-paste.
+Rewrite the following crypto news in a Binance-style format:
+- Use engaging and concise sentences.
+- Include emojis for excitement, warnings, or trends.
+- Highlight coin symbols like $XRP, $BTC, $ETH.
+- Make it easy to read and copy-paste.
 
-    Original News:
-    {text}
+Original News:
+{text}
 
-    Output:
-    """
+Output:
+"""
     try:
-        response = openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=200
         )
-        rewritten_news = response['choices'][0]['message']['content'].strip()
+        rewritten_news = response.choices[0].message.content.strip()
         return rewritten_news
     except Exception as e:
         print(f"Error summarizing news: {e}")
@@ -47,7 +47,7 @@ def summarize_news_binance_style(text):
 # Fetch RSS news
 def fetch_rss_news():
     urls = [
-        "https://cointelegraph.com/rss",  # example RSS feed
+        "https://cointelegraph.com/rss",
         "https://www.coindesk.com/arc/outboundfeeds/rss/"
     ]
     news_items = []
@@ -55,33 +55,44 @@ def fetch_rss_news():
         feed = feedparser.parse(url)
         for entry in feed.entries[:5]:
             summary = summarize_news_binance_style(entry.get("summary", entry.get("title", "")))
+            image = ""
+            # Attempt to get image if available
+            media_content = entry.get("media_content")
+            if media_content and len(media_content) > 0:
+                image = media_content[0].get("url", "")
             news_items.append({
                 "title": entry.title,
                 "link": entry.link,
                 "summary": summary,
                 "source": feed.feed.title,
                 "date": entry.get("published", ""),
-                "image": entry.get("media_content", [{}])[0].get("url", "")
+                "image": image
             })
     return news_items
 
-# Fetch Twitter/X news (optional)
+# Fetch Twitter/X news safely
 def fetch_twitter_news():
     usernames = ["Cointelegraph", "CoinDesk"]
     news_items = []
     for user in usernames:
-        tweets = twitter_client.get_users_tweets(id=twitter_client.get_user(username=user).data.id, max_results=5)
-        if tweets.data:
-            for tweet in tweets.data:
-                summary = summarize_news_binance_style(tweet.text)
-                news_items.append({
-                    "title": tweet.text[:50]+"...",
-                    "link": f"https://twitter.com/{user}/status/{tweet.id}",
-                    "summary": summary,
-                    "source": f"Twitter/{user}",
-                    "date": tweet.created_at if hasattr(tweet,'created_at') else "",
-                    "image": ""
-                })
+        try:
+            user_id = twitter_client.get_user(username=user).data.id
+            tweets = twitter_client.get_users_tweets(id=user_id, max_results=3)
+            if tweets.data:
+                for tweet in tweets.data:
+                    summary = summarize_news_binance_style(tweet.text)
+                    news_items.append({
+                        "title": tweet.text[:50]+"...",
+                        "link": f"https://twitter.com/{user}/status/{tweet.id}",
+                        "summary": summary,
+                        "source": f"Twitter/{user}",
+                        "date": tweet.created_at if hasattr(tweet,'created_at') else "",
+                        "image": ""
+                    })
+        except tweepy.TooManyRequests:
+            print(f"Rate limit reached for {user}, skipping.")
+        except Exception as e:
+            print(f"Error fetching tweets for {user}: {e}")
     return news_items
 
 @app.route("/", methods=["GET"])
