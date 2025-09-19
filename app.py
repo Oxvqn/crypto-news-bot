@@ -1,99 +1,101 @@
 from flask import Flask, render_template, request
 import feedparser
+import openai
+import os
 import requests
 import tweepy
-import openai
-import datetime
-
-# ================= CONFIG =================
-openai.api_key = "YOUR_OPENAI_API_KEY"
-TWITTER_BEARER_TOKEN = "YOUR_TWITTER_BEARER_TOKEN"
-
-# Twitter client
-client = tweepy.Client(bearer_token=TWITTER_BEARER_TOKEN)
-
-RSS_FEEDS = {
-    "CoinTelegraph": "https://cointelegraph.com/rss",
-    "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/"
-}
-
-COINS = ["XR", "BTC", "ETH"]
-# ==========================================
 
 app = Flask(__name__)
 
-# ---------- Helper Functions ----------
-def summarize_text(text):
+# Environment variables
+openai.api_key = os.environ.get("OPENAI_API_KEY")
+twitter_bearer_token = os.environ.get("TWITTER_BEARER_TOKEN")
+
+# Coins to filter
+coins = ["XRP", "BTC", "ETH", "MC"]
+
+# Twitter client
+twitter_client = tweepy.Client(bearer_token=twitter_bearer_token)
+
+# Binance-style summarization function
+def summarize_news_binance_style(text):
+    prompt = f"""
+    Rewrite the following crypto news in a Binance-style format:
+    - Use engaging and concise sentences.
+    - Include emojis for excitement, warnings, or trends.
+    - Highlight coin symbols like $XRP, $BTC, $ETH.
+    - Make it easy to read and copy-paste.
+
+    Original News:
+    {text}
+
+    Output:
+    """
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": f"Summarize this in 2 sentences:\n{text}"}],
-            max_tokens=60
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=200
         )
-        summary = response['choices'][0]['message']['content'].strip()
-        return summary
-    except:
-        return text[:200] + "..."
+        rewritten_news = response['choices'][0]['message']['content'].strip()
+        return rewritten_news
+    except Exception as e:
+        print(f"Error summarizing news: {e}")
+        return text  # fallback
 
+# Fetch RSS news
 def fetch_rss_news():
-    news_list = []
-    for source, url in RSS_FEEDS.items():
+    urls = [
+        "https://cointelegraph.com/rss",  # example RSS feed
+        "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    ]
+    news_items = []
+    for url in urls:
         feed = feedparser.parse(url)
         for entry in feed.entries[:5]:
-            image = entry.get("media_content", [{"url": ""}])[0]["url"]
-            summary = summarize_text(entry.summary)
-            date = entry.get("published", str(datetime.datetime.now()))
-            news_list.append({
+            summary = summarize_news_binance_style(entry.get("summary", entry.get("title", "")))
+            news_items.append({
                 "title": entry.title,
-                "source": source,
-                "date": date,
-                "summary": summary,
                 "link": entry.link,
-                "image": image
+                "summary": summary,
+                "source": feed.feed.title,
+                "date": entry.get("published", ""),
+                "image": entry.get("media_content", [{}])[0].get("url", "")
             })
-    return news_list
+    return news_items
 
+# Fetch Twitter/X news (optional)
 def fetch_twitter_news():
-    news_list = []
-    accounts = ["Cointelegraph", "CoinDesk"]
-    for account in accounts:
-        try:
-            user = client.get_user(username=account)
-            tweets = client.get_users_tweets(id=user.data.id, max_results=5, tweet_fields=["created_at"])
+    usernames = ["Cointelegraph", "CoinDesk"]
+    news_items = []
+    for user in usernames:
+        tweets = twitter_client.get_users_tweets(id=twitter_client.get_user(username=user).data.id, max_results=5)
+        if tweets.data:
             for tweet in tweets.data:
-                summary = summarize_text(tweet.text)
-                news_list.append({
+                summary = summarize_news_binance_style(tweet.text)
+                news_items.append({
                     "title": tweet.text[:50]+"...",
-                    "source": f"Twitter - {account}",
-                    "date": tweet.created_at,
+                    "link": f"https://twitter.com/{user}/status/{tweet.id}",
                     "summary": summary,
-                    "link": f"https://twitter.com/{account}/status/{tweet.id}",
+                    "source": f"Twitter/{user}",
+                    "date": tweet.created_at if hasattr(tweet,'created_at') else "",
                     "image": ""
                 })
-        except:
-            continue
-    return news_list
+    return news_items
 
-# ---------- Routes ----------
-@app.route('/')
+@app.route("/", methods=["GET"])
 def index():
-    coin_filter = request.args.get('coin', None)
+    selected_coin = request.args.get("coin", "")
     rss_news = fetch_rss_news()
     twitter_news = fetch_twitter_news()
     news = rss_news + twitter_news
 
-    # Filter by coin
-    if coin_filter:
-        news = [n for n in news if coin_filter.upper() in n["title"].upper()]
+    if selected_coin:
+        news = [n for n in news if selected_coin in n["title"] or selected_coin in n["summary"]]
 
-    news.sort(key=lambda x: x["date"], reverse=True)
-
-    return render_template('index.html', news=news, coins=COINS, selected_coin=coin_filter)
-
-# ---------- Run App ----------
-import os
+    return render_template("index.html", news=news, coins=coins, selected_coin=selected_coin)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Use Render's assigned port
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
-
