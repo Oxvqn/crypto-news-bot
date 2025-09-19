@@ -20,20 +20,20 @@ twitter_client = tweepy.Client(bearer_token=twitter_bearer_token)
 
 # Binance-style summarization function using GPT-3.5
 def summarize_news_binance_style(text):
-    # Add current timestamp to prompt for slight variation
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     prompt = f"""
-Rewrite the following crypto news in a Binance-style format:
-- Use engaging and concise sentences.
-- Include emojis for excitement, warnings, or trends.
-- Highlight coin symbols like $XRP, $BTC, $ETH.
-- Make it easy to read and copy-paste.
-- Make it slightly different each time it is rewritten.
-
-Timestamp: {timestamp}
+Rewrite the following crypto news to **look exactly like a Binance news post**:
+- Short, punchy sentences.
+- Include emojis for excitement, warnings, and trends.
+- Highlight coins using symbols like $XRP, $BTC, $ETH.
+- Easy to read and copy-paste-friendly.
+- Make it slightly different each time.
+- Keep it concise, max 2-3 lines if possible.
 
 Original News:
 {text}
+
+Timestamp: {timestamp}
 
 Output:
 """
@@ -41,8 +41,8 @@ Output:
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.8,  # higher randomness for variation
-            max_tokens=200
+            temperature=0.85,
+            max_tokens=150
         )
         rewritten_news = response.choices[0].message.content.strip()
         return rewritten_news
@@ -59,7 +59,7 @@ def fetch_rss_news():
     news_items = []
     for url in urls:
         feed = feedparser.parse(url)
-        for entry in feed.entries[:15]:  # fetch more items for variety
+        for entry in feed.entries[:15]:
             summary = summarize_news_binance_style(entry.get("summary", entry.get("title", "")))
             image = ""
             media_content = entry.get("media_content")
@@ -82,7 +82,7 @@ def fetch_twitter_news():
     for user in usernames:
         try:
             user_id = twitter_client.get_user(username=user).data.id
-            tweets = twitter_client.get_users_tweets(id=user_id, max_results=5)  # more tweets for variety
+            tweets = twitter_client.get_users_tweets(id=user_id, max_results=5)
             if tweets.data:
                 for tweet in tweets.data:
                     summary = summarize_news_binance_style(tweet.text)
@@ -108,18 +108,17 @@ def index():
 
     # Combine and shuffle news for dynamic display
     all_news = rss_news + twitter_news
-    random.shuffle(all_news)  # random order on each page load
+    random.shuffle(all_news)
 
     # Filter by coin if selected
     if selected_coin:
         all_news = [n for n in all_news if selected_coin in n["title"] or selected_coin in n["summary"]]
 
     # Limit displayed news items
-    all_news = all_news[:10]  # show top 10 shuffled items
+    all_news = all_news[:10]
 
     return render_template("index.html", news=all_news, coins=coins, selected_coin=selected_coin)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
-
