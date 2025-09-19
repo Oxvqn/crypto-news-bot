@@ -1,7 +1,6 @@
 from flask import Flask, render_template, request
 import feedparser
 import os
-import requests
 import tweepy
 from openai import OpenAI
 
@@ -17,7 +16,7 @@ coins = ["XRP", "BTC", "ETH", "MC"]
 # Twitter client
 twitter_client = tweepy.Client(bearer_token=twitter_bearer_token)
 
-# Binance-style summarization function
+# Binance-style summarization function using GPT-3.5
 def summarize_news_binance_style(text):
     prompt = f"""
 Rewrite the following crypto news in a Binance-style format:
@@ -33,7 +32,7 @@ Output:
 """
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",  # Changed from gpt-4 to gpt-3.5-turbo
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=200
@@ -42,7 +41,7 @@ Output:
         return rewritten_news
     except Exception as e:
         print(f"Error summarizing news: {e}")
-        return text  # fallback
+        return text  # fallback to raw text
 
 # Fetch RSS news
 def fetch_rss_news():
@@ -56,7 +55,6 @@ def fetch_rss_news():
         for entry in feed.entries[:5]:
             summary = summarize_news_binance_style(entry.get("summary", entry.get("title", "")))
             image = ""
-            # Attempt to get image if available
             media_content = entry.get("media_content")
             if media_content and len(media_content) > 0:
                 image = media_content[0].get("url", "")
