@@ -39,12 +39,16 @@
                   data-source="{{ item.source }}" 
                   data-date="{{ item.date }}" 
                   data-link="{{ item.link }}" 
-                  data-summary="{{ item.summary }}">Copy</button>
+                  data-summary="{{ item.summary }}"
+                  data-image="{{ item.image }}">Copy</button>
         </div>
       </div>
     </div>
     {% endfor %}
   </main>
+
+  <!-- Notification element -->
+  <div id="copy-notification" class="fixed bottom-5 right-5 bg-green-600 text-white px-4 py-2 rounded shadow-lg opacity-0 transition-opacity duration-300">Copied!</div>
 
   <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
